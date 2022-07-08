@@ -93,9 +93,7 @@ mod tests {
         assert!(arena.allocate(8, 8).is_ok());
         assert_eq!(arena.cursor, 8);
         unsafe {
-            assert!(arena
-                .deallocate(arena.offset(0)?)
-                .is_ok());
+            assert!(arena.deallocate(arena.offset(0)?).is_ok());
         }
         assert_eq!(arena.cursor, 8);
         Ok(())

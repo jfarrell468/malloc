@@ -129,10 +129,7 @@ mod tests {
         let mut heap = Heap::new();
         assert!(heap.allocate(128, 16).is_ok());
         unsafe {
-            assert_eq!(
-                heap.offset_from(NonNull::new_unchecked(heap.addr)),
-                Ok(0)
-            );
+            assert_eq!(heap.offset_from(NonNull::new_unchecked(heap.addr)), Ok(0));
             assert_eq!(
                 heap.offset_from(NonNull::new_unchecked(heap.addr.offset(10))),
                 Ok(10)
@@ -142,9 +139,7 @@ mod tests {
                 Err(AllocError::OutOfBounds)
             );
             assert_eq!(
-                heap.offset_from(
-                    NonNull::new_unchecked(heap.addr.offset(1000))
-                ),
+                heap.offset_from(NonNull::new_unchecked(heap.addr.offset(1000))),
                 Err(AllocError::OutOfBounds)
             );
         }
@@ -173,9 +168,7 @@ mod tests {
                 heap.deallocate(heap.offset(1)?),
                 Err(AllocError::InvalidAddress)
             );
-            assert!(heap
-                .deallocate(NonNull::new_unchecked(heap.addr))
-                .is_ok());
+            assert!(heap.deallocate(NonNull::new_unchecked(heap.addr)).is_ok());
         }
         assert_eq!(heap.size(), 0);
         assert_eq!(heap.addr, std::ptr::null_mut());

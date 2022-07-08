@@ -280,10 +280,7 @@ mod tests {
         let addr = alloc.allocate(8, 8)?;
         let pd;
         unsafe {
-            pd = std::mem::transmute::<NonNull<u8>, NonNull<Pd>>(
-                alloc.arena.offset(0)?,
-            )
-            .as_ref();
+            pd = std::mem::transmute::<NonNull<u8>, NonNull<Pd>>(alloc.arena.offset(0)?).as_ref();
         }
         unsafe {
             assert!(alloc.deallocate(addr).is_ok());
@@ -347,14 +344,9 @@ mod tests {
         let pd0;
         let pd1;
         unsafe {
-            pd0 = std::mem::transmute::<NonNull<u8>, NonNull<Pd>>(
-                alloc.arena.offset(0)?,
-            )
-            .as_ref();
+            pd0 = std::mem::transmute::<NonNull<u8>, NonNull<Pd>>(alloc.arena.offset(0)?).as_ref();
             pd1 = std::mem::transmute::<NonNull<u8>, NonNull<Pd>>(
-                alloc
-                    .arena
-                    .offset(mem::size_of::<Pd>())?,
+                alloc.arena.offset(mem::size_of::<Pd>())?,
             )
             .as_ref();
         }
