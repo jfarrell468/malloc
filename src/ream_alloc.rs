@@ -1,6 +1,6 @@
 use crate::allocator::{align_up, AllocError, Allocator};
 use crate::arena::Arena;
-use std::iter::Iterator;
+use std::iter::{IntoIterator, Iterator};
 use std::mem;
 use std::ptr::NonNull;
 
@@ -20,13 +20,124 @@ struct Pd {
     class: SizeClass,
 }
 
+#[derive(Debug)]
+struct PdRef {
+    idx: u32,
+    list: NonNull<PdList>,
+}
+
+impl PdRef {
+    fn pd(&self) -> Result<&mut Pd, AllocError> {
+        unsafe { self.list.as_ref().pd(self.idx) }
+    }
+    fn unlink(&mut self) -> Result<&mut Pd, AllocError> {
+        let pd_next = self.pd()?.next;
+        let pd_prev = self.pd()?.prev;
+        if let Some(next_idx) = pd_next {
+            let next;
+            unsafe {
+                next = self.list.as_mut().pd(next_idx)?;
+            }
+            next.prev = pd_prev;
+        }
+
+        if unsafe { self.list.as_ref().root } == Some(self.idx) {
+            unsafe {
+                self.list.as_mut().root = pd_next;
+            }
+        } else if let Some(prev_idx) = pd_prev {
+            let prev;
+            unsafe {
+                prev = self.list.as_mut().pd(prev_idx)?;
+            }
+            prev.next = pd_next;
+        }
+        let pd = self.pd()?;
+        pd.prev = None;
+        pd.next = None;
+        Ok(pd)
+    }
+}
+
+#[derive(Debug)]
+struct PdList {
+    root: Option<u32>,
+    addr: NonNull<Pd>,
+    num_pds: u32,
+}
+
+impl PdList {
+    unsafe fn pd(&self, idx: u32) -> Result<&mut Pd, AllocError> {
+        // println!("Pdlist.pd(idx = {})", idx);
+        if idx >= self.num_pds {
+            // println!("Out of bounds");
+            return Err(AllocError::OutOfBounds);
+        }
+        Ok(&mut *self.addr.as_ptr().offset(idx as isize))
+    }
+    fn push(&mut self, idx: u32) -> Result<&mut Pd, AllocError> {
+        if let Some(old_idx) = self.root {
+            let old_head;
+            unsafe {
+                old_head = self.pd(old_idx)?;
+            }
+            old_head.prev = Some(idx);
+        }
+        let old_root = self.root;
+        self.root = Some(idx);
+        let pd;
+        unsafe {
+            pd = self.pd(idx)?;
+        }
+        pd.prev = None;
+        pd.next = old_root;
+        Ok(pd)
+    }
+}
+
+impl<'a> IntoIterator for &'a mut PdList {
+    type Item = PdRef;
+    type IntoIter = PdListIter;
+    fn into_iter(self) -> Self::IntoIter {
+        // println!("PdList.into_iter, self = {:?}", self);
+        PdListIter {
+            next: self.root,
+            list: NonNull::from(self),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct PdListIter {
+    next: Option<u32>,
+    list: NonNull<PdList>,
+}
+
+impl Iterator for PdListIter {
+    type Item = PdRef;
+    fn next(&mut self) -> Option<Self::Item> {
+        // println!("PdListIter.next()");
+        match self.next {
+            Some(idx) => {
+                unsafe {
+                    self.next = self.list.as_mut().pd(idx).unwrap().next;
+                }
+                Some(PdRef {
+                    idx,
+                    list: self.list,
+                })
+            }
+            None => None,
+        }
+    }
+}
+
 pub struct ReamAlloc {
     arena: Arena,
     page_size: usize,
-    max_pages: u32,
     pd_pages: u32,
     num_pages: u32,
-    free_list: Option<u32>,
+    free_list: PdList,
 }
 
 impl ReamAlloc {
@@ -42,13 +153,20 @@ impl ReamAlloc {
         let pd_pages = align_up(mem::size_of::<Pd>() * max_pages, page_size) / page_size;
         let mut arena = Arena::new(aligned_size, page_size)?;
         arena.allocate(pd_pages * page_size, page_size)?;
+        let arena_addr;
+        unsafe {
+            arena_addr = std::mem::transmute::<NonNull<u8>, NonNull<Pd>>(arena.offset(0)?);
+        }
         Ok(ReamAlloc {
             arena: arena,
             page_size: page_size,
-            max_pages: max_pages as u32,
             pd_pages: pd_pages as u32,
             num_pages: 0,
-            free_list: None,
+            free_list: PdList {
+                root: None,
+                addr: arena_addr,
+                num_pds: max_pages as u32,
+            },
         })
     }
     fn get_pd(&self, idx: usize) -> Result<&mut Pd, AllocError> {
@@ -76,37 +194,19 @@ unsafe impl Allocator for ReamAlloc {
         }
         let requested_pages = requested_pages as u16;
 
-        // See if we can satisfy from the free list.
-        let mut next_free = self.free_list;
-        // println!("Searching free list. next_free = {:?}", next_free);
-        while next_free.is_some() {
-            let idx = next_free.unwrap();
-            let this_pd: &Pd = self.get_pd(idx as usize)?; // Immutable
-                                                           // println!("{:?}", this_pd);
-            if this_pd.len <= requested_pages {
+        // println!("Searching free list: {:?}", self.free_list);
+        for mut iter in &mut self.free_list {
+            // println!("Searching free list. iter = {:?}", iter);
+            if iter.pd()?.len <= requested_pages {
                 // println!("Found a free ream.");
-                let mut new_free_list = self.free_list.clone();
-                if let Some(next_idx) = this_pd.next {
-                    self.get_pd(next_idx as usize)?.prev = this_pd.prev;
-                }
-
-                if self.free_list == Some(idx) {
-                    new_free_list = this_pd.next;
-                } else if let Some(prev_idx) = this_pd.prev {
-                    self.get_pd(prev_idx as usize)?.next = this_pd.next;
-                }
-                let this_pd = self.get_pd(idx as usize)?;
-                this_pd.gc_bits = 1;
-                this_pd.prev = None;
-                this_pd.next = None;
-                self.free_list = new_free_list;
+                let pd = iter.unlink()?;
+                pd.gc_bits = 1;
                 return self
                     .arena
-                    .offset((self.pd_pages + idx) as usize * self.page_size);
+                    .offset((self.pd_pages + iter.idx) as usize * self.page_size);
             }
-            next_free = this_pd.next;
-            // println!("Searching free list. next_free = {:?}", next_free);
         }
+
         // println!("Failed to find a free ream.");
         let addr = self.arena.allocate(aligned_size, self.page_size)?;
         let pd = self.num_pages;
@@ -125,16 +225,8 @@ unsafe impl Allocator for ReamAlloc {
 
     unsafe fn deallocate(&mut self, ptr: NonNull<u8>) -> Result<(), AllocError> {
         let idx = self.get_page_from_addr(ptr)?;
-        let pd = self.get_pd(idx as usize)?;
+        let pd = self.free_list.push(idx)?;
         pd.gc_bits = 0;
-        match &self.free_list {
-            None => self.free_list = Some(idx as u32),
-            Some(old_head) => {
-                self.get_pd(*old_head as usize)?.prev = Some(idx);
-                pd.next = Some(*old_head);
-                self.free_list = Some(idx);
-            }
-        }
         Ok(())
     }
 }
@@ -156,15 +248,15 @@ mod tests {
         let alloc = ReamAlloc::new(HEAP_SIZE, PAGE_SIZE).expect("Failed to create ReamAlloc");
         assert_eq!(alloc.page_size, PAGE_SIZE);
         assert_eq!(
-            alloc.max_pages as usize,
+            alloc.free_list.num_pds as usize,
             HEAP_SIZE / (PAGE_SIZE + mem::size_of::<Pd>())
         );
         assert_eq!(
             alloc.pd_pages as usize,
-            ((alloc.max_pages as usize) * mem::size_of::<Pd>() + PAGE_SIZE - 1) / PAGE_SIZE
+            ((alloc.free_list.num_pds as usize) * mem::size_of::<Pd>() + PAGE_SIZE - 1) / PAGE_SIZE
         );
         assert_eq!(alloc.num_pages, 0);
-        assert!(alloc.free_list.is_none());
+        assert!(alloc.free_list.root.is_none());
     }
 
     #[test]
@@ -177,7 +269,7 @@ mod tests {
         assert_eq!(pd.gc_bits, 1);
         assert!(pd.prev.is_none());
         assert!(pd.next.is_none());
-        assert!(alloc.free_list.is_none());
+        assert!(alloc.free_list.root.is_none());
     }
 
     #[test]
@@ -194,11 +286,12 @@ mod tests {
         unsafe {
             assert!(alloc.deallocate(addr).is_ok());
         }
+        // println!("{:?}", pd);
         assert_eq!(pd.len, 1);
         assert_eq!(pd.gc_bits, 0);
         assert!(pd.prev.is_none());
         assert!(pd.next.is_none());
-        assert_eq!(alloc.free_list, Some(0));
+        assert_eq!(alloc.free_list.root, Some(0));
     }
 
     #[test]
@@ -208,6 +301,7 @@ mod tests {
         unsafe {
             assert!(alloc.deallocate(old_addr).is_ok());
         }
+        // println!("Free list after deallocate: {:?}", alloc.free_list);
         let addr = alloc.allocate(8, 8).expect("Failed to allocate");
         assert_eq!(addr, old_addr);
         let pd = alloc.get_pd(0).expect("Failed to get page descriptor");
@@ -215,7 +309,7 @@ mod tests {
         assert_eq!(pd.gc_bits, 1);
         assert!(pd.prev.is_none());
         assert!(pd.next.is_none());
-        assert!(alloc.free_list.is_none());
+        assert!(alloc.free_list.root.is_none());
     }
 
     #[test]
@@ -228,7 +322,7 @@ mod tests {
         assert_eq!(pd.gc_bits, 1);
         assert!(pd.prev.is_none());
         assert!(pd.next.is_none());
-        assert!(alloc.free_list.is_none());
+        assert!(alloc.free_list.root.is_none());
 
         assert!(alloc.allocate(8, 8).is_ok());
         assert_eq!(alloc.num_pages, 2);
@@ -237,7 +331,7 @@ mod tests {
         assert_eq!(pd.gc_bits, 1);
         assert!(pd.prev.is_none());
         assert!(pd.next.is_none());
-        assert!(alloc.free_list.is_none());
+        assert!(alloc.free_list.root.is_none());
     }
 
     #[test]
@@ -263,7 +357,7 @@ mod tests {
         unsafe {
             assert!(alloc.deallocate(addr0).is_ok());
         }
-        assert_eq!(alloc.free_list, Some(0));
+        assert_eq!(alloc.free_list.root, Some(0));
         assert_eq!(pd0.len, 1);
         assert_eq!(pd0.gc_bits, 0);
         assert!(pd0.prev.is_none());
@@ -284,6 +378,6 @@ mod tests {
         assert_eq!(pd1.gc_bits, 0);
         assert!(pd1.prev.is_none());
         assert_eq!(pd1.next, Some(0));
-        assert_eq!(alloc.free_list, Some(1));
+        assert_eq!(alloc.free_list.root, Some(1));
     }
 }

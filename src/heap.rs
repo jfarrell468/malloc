@@ -44,7 +44,7 @@ impl Drop for Heap {
         // println!("Dropping heap");
         if !self.addr.is_null() {
             unsafe {
-                self.deallocate(NonNull::new_unchecked(self.addr));
+                self.deallocate(NonNull::new_unchecked(self.addr)).unwrap();
             }
         }
     }
