@@ -57,43 +57,47 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_new() {
-        let arena = Arena::new(1024, 128).expect("Failed to create arena");
+    fn test_new() -> Result<(), AllocError> {
+        let arena = Arena::new(1024, 128)?;
         assert_eq!(arena.cursor, 0);
         assert_eq!(arena.max_size(), 1024);
+        Ok(())
     }
 
     #[test]
-    fn test_allocate() {
-        let mut arena = Arena::new(1024, 128).expect("Failed to create arena");
-        let addr = arena.allocate(8, 8).expect("Failed to allocate");
-        assert_eq!(addr, arena.offset(0).expect("Offset failed"));
+    fn test_allocate() -> Result<(), AllocError> {
+        let mut arena = Arena::new(1024, 128)?;
+        let addr = arena.allocate(8, 8)?;
+        assert_eq!(addr, arena.offset(0)?);
         assert_eq!(arena.cursor, 8);
-        let addr = arena.allocate(8, 8).expect("Failed to allocate");
-        assert_eq!(addr, arena.offset(8).expect("Offset failed"));
+        let addr = arena.allocate(8, 8)?;
+        assert_eq!(addr, arena.offset(8)?);
         assert_eq!(arena.cursor, 16);
         assert_eq!(arena.allocate(1024, 8), Err(AllocError::OutOfMemory));
         assert_eq!(arena.cursor, 16);
+        Ok(())
     }
 
     #[test]
-    fn test_offset() {
-        let mut arena = Arena::new(1024, 128).expect("Failed to create arena");
+    fn test_offset() -> Result<(), AllocError> {
+        let mut arena = Arena::new(1024, 128)?;
         assert!(arena.allocate(8, 8).is_ok());
         assert!(arena.offset(4).is_ok());
         assert_eq!(arena.offset(10), Err(AllocError::OutOfBounds));
+        Ok(())
     }
 
     #[test]
-    fn test_deallocate() {
-        let mut arena = Arena::new(1024, 128).expect("Failed to create arena");
+    fn test_deallocate() -> Result<(), AllocError> {
+        let mut arena = Arena::new(1024, 128)?;
         assert!(arena.allocate(8, 8).is_ok());
         assert_eq!(arena.cursor, 8);
         unsafe {
             assert!(arena
-                .deallocate(arena.offset(0).expect("Offset failed"))
+                .deallocate(arena.offset(0)?)
                 .is_ok());
         }
         assert_eq!(arena.cursor, 8);
+        Ok(())
     }
 }

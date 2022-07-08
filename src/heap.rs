@@ -130,20 +130,20 @@ mod tests {
         assert!(heap.allocate(128, 16).is_ok());
         unsafe {
             assert_eq!(
-                heap.offset_from(NonNull::new(heap.addr).expect("NonNull::new failed")),
+                heap.offset_from(NonNull::new_unchecked(heap.addr)),
                 Ok(0)
             );
             assert_eq!(
-                heap.offset_from(NonNull::new(heap.addr.offset(10)).expect("NonNull::new failed")),
+                heap.offset_from(NonNull::new_unchecked(heap.addr.offset(10))),
                 Ok(10)
             );
             assert_eq!(
-                heap.offset_from(NonNull::new(heap.addr.offset(-1)).expect("NonNull::new failed")),
+                heap.offset_from(NonNull::new_unchecked(heap.addr.offset(-1))),
                 Err(AllocError::OutOfBounds)
             );
             assert_eq!(
                 heap.offset_from(
-                    NonNull::new(heap.addr.offset(1000)).expect("NonNull::new failed")
+                    NonNull::new_unchecked(heap.addr.offset(1000))
                 ),
                 Err(AllocError::OutOfBounds)
             );
@@ -158,32 +158,33 @@ mod tests {
     }
 
     #[test]
-    fn test_deallocate() {
+    fn test_deallocate() -> Result<(), AllocError> {
         let mut heap = Heap::new();
         let mut x = 1;
         unsafe {
             assert_eq!(
-                heap.deallocate(NonNull::new(&mut x).expect("NonNull::new failed")),
+                heap.deallocate(NonNull::new_unchecked(&mut x)),
                 Err(AllocError::HeapNotAllocated)
             );
         }
         assert!(heap.allocate(128, 16).is_ok());
         unsafe {
             assert_eq!(
-                heap.deallocate(heap.offset(1).expect("Offset failed")),
+                heap.deallocate(heap.offset(1)?),
                 Err(AllocError::InvalidAddress)
             );
             assert!(heap
-                .deallocate(NonNull::new(heap.addr).expect("NonNull::new failed"))
+                .deallocate(NonNull::new_unchecked(heap.addr))
                 .is_ok());
         }
         assert_eq!(heap.size(), 0);
         assert_eq!(heap.addr, std::ptr::null_mut());
         unsafe {
             assert_eq!(
-                heap.deallocate(NonNull::new(&mut x).expect("NonNull::new failed")),
+                heap.deallocate(NonNull::new_unchecked(&mut x)),
                 Err(AllocError::HeapNotAllocated)
             );
         }
+        Ok(())
     }
 }

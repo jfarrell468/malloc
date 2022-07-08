@@ -244,8 +244,8 @@ mod tests {
     }
 
     #[test]
-    fn test_new() {
-        let alloc = ReamAlloc::new(HEAP_SIZE, PAGE_SIZE).expect("Failed to create ReamAlloc");
+    fn test_new() -> Result<(), AllocError> {
+        let alloc = ReamAlloc::new(HEAP_SIZE, PAGE_SIZE)?;
         assert_eq!(alloc.page_size, PAGE_SIZE);
         assert_eq!(
             alloc.free_list.num_pds as usize,
@@ -257,29 +257,31 @@ mod tests {
         );
         assert_eq!(alloc.num_pages, 0);
         assert!(alloc.free_list.root.is_none());
+        Ok(())
     }
 
     #[test]
-    fn test_allocate() {
-        let mut alloc = ReamAlloc::new(HEAP_SIZE, PAGE_SIZE).expect("Failed to create ReamAlloc");
+    fn test_allocate() -> Result<(), AllocError> {
+        let mut alloc = ReamAlloc::new(HEAP_SIZE, PAGE_SIZE)?;
         assert!(alloc.allocate(8, 8).is_ok());
         assert_eq!(alloc.num_pages, 1);
-        let pd = alloc.get_pd(0).expect("Failed to get page descriptor");
+        let pd = alloc.get_pd(0)?;
         assert_eq!(pd.len, 1);
         assert_eq!(pd.gc_bits, 1);
         assert!(pd.prev.is_none());
         assert!(pd.next.is_none());
         assert!(alloc.free_list.root.is_none());
+        Ok(())
     }
 
     #[test]
-    fn test_deallocate() {
-        let mut alloc = ReamAlloc::new(HEAP_SIZE, PAGE_SIZE).expect("Failed to create ReamAlloc");
-        let addr = alloc.allocate(8, 8).expect("Failed to allocate");
+    fn test_deallocate() -> Result<(), AllocError> {
+        let mut alloc = ReamAlloc::new(HEAP_SIZE, PAGE_SIZE)?;
+        let addr = alloc.allocate(8, 8)?;
         let pd;
         unsafe {
             pd = std::mem::transmute::<NonNull<u8>, NonNull<Pd>>(
-                alloc.arena.offset(0).expect("Failed to get arena offset"),
+                alloc.arena.offset(0)?,
             )
             .as_ref();
         }
@@ -292,32 +294,34 @@ mod tests {
         assert!(pd.prev.is_none());
         assert!(pd.next.is_none());
         assert_eq!(alloc.free_list.root, Some(0));
+        Ok(())
     }
 
     #[test]
-    fn test_reallocate() {
-        let mut alloc = ReamAlloc::new(HEAP_SIZE, PAGE_SIZE).expect("Failed to create ReamAlloc");
-        let old_addr = alloc.allocate(8, 8).expect("Failed to allocate");
+    fn test_reallocate() -> Result<(), AllocError> {
+        let mut alloc = ReamAlloc::new(HEAP_SIZE, PAGE_SIZE)?;
+        let old_addr = alloc.allocate(8, 8)?;
         unsafe {
             assert!(alloc.deallocate(old_addr).is_ok());
         }
         // println!("Free list after deallocate: {:?}", alloc.free_list);
-        let addr = alloc.allocate(8, 8).expect("Failed to allocate");
+        let addr = alloc.allocate(8, 8)?;
         assert_eq!(addr, old_addr);
-        let pd = alloc.get_pd(0).expect("Failed to get page descriptor");
+        let pd = alloc.get_pd(0)?;
         assert_eq!(pd.len, 1);
         assert_eq!(pd.gc_bits, 1);
         assert!(pd.prev.is_none());
         assert!(pd.next.is_none());
         assert!(alloc.free_list.root.is_none());
+        Ok(())
     }
 
     #[test]
-    fn test_multi_allocate() {
-        let mut alloc = ReamAlloc::new(HEAP_SIZE, PAGE_SIZE).expect("Failed to create ReamAlloc");
+    fn test_multi_allocate() -> Result<(), AllocError> {
+        let mut alloc = ReamAlloc::new(HEAP_SIZE, PAGE_SIZE)?;
         assert!(alloc.allocate(8, 8).is_ok());
         assert_eq!(alloc.num_pages, 1);
-        let pd = alloc.get_pd(0).expect("Failed to get page descriptor");
+        let pd = alloc.get_pd(0)?;
         assert_eq!(pd.len, 1);
         assert_eq!(pd.gc_bits, 1);
         assert!(pd.prev.is_none());
@@ -326,31 +330,31 @@ mod tests {
 
         assert!(alloc.allocate(8, 8).is_ok());
         assert_eq!(alloc.num_pages, 2);
-        let pd = alloc.get_pd(1).expect("Failed to get page descriptor");
+        let pd = alloc.get_pd(1)?;
         assert_eq!(pd.len, 1);
         assert_eq!(pd.gc_bits, 1);
         assert!(pd.prev.is_none());
         assert!(pd.next.is_none());
         assert!(alloc.free_list.root.is_none());
+        Ok(())
     }
 
     #[test]
-    fn test_multi_deallocate() {
-        let mut alloc = ReamAlloc::new(HEAP_SIZE, PAGE_SIZE).expect("Failed to create ReamAlloc");
-        let addr0 = alloc.allocate(8, 8).expect("Failed to allocate");
-        let addr1 = alloc.allocate(8, 8).expect("Failed to allocate");
+    fn test_multi_deallocate() -> Result<(), AllocError> {
+        let mut alloc = ReamAlloc::new(HEAP_SIZE, PAGE_SIZE)?;
+        let addr0 = alloc.allocate(8, 8)?;
+        let addr1 = alloc.allocate(8, 8)?;
         let pd0;
         let pd1;
         unsafe {
             pd0 = std::mem::transmute::<NonNull<u8>, NonNull<Pd>>(
-                alloc.arena.offset(0).expect("Failed to get arena offset"),
+                alloc.arena.offset(0)?,
             )
             .as_ref();
             pd1 = std::mem::transmute::<NonNull<u8>, NonNull<Pd>>(
                 alloc
                     .arena
-                    .offset(mem::size_of::<Pd>())
-                    .expect("Failed to get arena offset"),
+                    .offset(mem::size_of::<Pd>())?,
             )
             .as_ref();
         }
@@ -379,5 +383,6 @@ mod tests {
         assert!(pd1.prev.is_none());
         assert_eq!(pd1.next, Some(0));
         assert_eq!(alloc.free_list.root, Some(1));
+        Ok(())
     }
 }
