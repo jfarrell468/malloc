@@ -17,7 +17,8 @@ pub fn align_up(size: usize, align: usize) -> usize {
 pub enum AllocError {
     HeapAlreadyAllocated,
     HeapNotAllocated,
-    MapFailed,
+    MmapFailed,
+    MunmapFailed,
     OutOfMemory,
     OutOfBounds,
     InsufficientAddressSpace,

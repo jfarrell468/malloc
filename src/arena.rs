@@ -1,3 +1,8 @@
+// An allocator that only grows.
+//
+// Backed by a heap, hands out addresses starting at the beginning of the
+// heap. Does not deallocate, but keeps track of how much has been allocated.
+
 use crate::allocator::{align_up, AllocError, Allocator};
 use crate::heap::Heap;
 use std::ptr::NonNull;
