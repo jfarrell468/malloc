@@ -28,29 +28,28 @@ struct PdRef {
 
 impl PdRef {
     fn pd(&self) -> Result<&mut Pd, AllocError> {
-        unsafe { self.list.as_ref().pd(self.idx) }
+        self.list().pd(self.idx)
+    }
+    // Safety of list() and list_mut():
+    // - self.list comes from a field in ReamAlloc, via PdListIter.
+    //   As long as ReamAlloc exists, so will the PdList.
+    fn list(&self) -> &PdList {
+        unsafe { self.list.as_ref() }
+    }
+    fn list_mut(&mut self) -> &mut PdList {
+        unsafe { self.list.as_mut() }
     }
     fn unlink(&mut self) -> Result<&mut Pd, AllocError> {
         let pd_next = self.pd()?.next;
         let pd_prev = self.pd()?.prev;
         if let Some(next_idx) = pd_next {
-            let next;
-            unsafe {
-                next = self.list.as_mut().pd(next_idx)?;
-            }
-            next.prev = pd_prev;
+            self.list().pd(next_idx)?.prev = pd_prev;
         }
 
-        if unsafe { self.list.as_ref().root } == Some(self.idx) {
-            unsafe {
-                self.list.as_mut().root = pd_next;
-            }
+        if self.list().root == Some(self.idx) {
+            self.list_mut().root = pd_next;
         } else if let Some(prev_idx) = pd_prev {
-            let prev;
-            unsafe {
-                prev = self.list.as_mut().pd(prev_idx)?;
-            }
-            prev.next = pd_next;
+            self.list().pd(prev_idx)?.next = pd_next;
         }
         let pd = self.pd()?;
         pd.prev = None;
@@ -67,28 +66,23 @@ struct PdList {
 }
 
 impl PdList {
-    unsafe fn pd(&self, idx: u32) -> Result<&mut Pd, AllocError> {
+    fn pd(&self, idx: u32) -> Result<&mut Pd, AllocError> {
         // println!("Pdlist.pd(idx = {})", idx);
         if idx >= self.num_pds {
             // println!("Out of bounds");
             return Err(AllocError::OutOfBounds);
         }
-        Ok(&mut *self.addr.as_ptr().offset(idx as isize))
+
+        unsafe { Ok(&mut *self.addr.as_ptr().offset(idx as isize)) }
     }
     fn push(&mut self, idx: u32) -> Result<&mut Pd, AllocError> {
         if let Some(old_idx) = self.root {
-            let old_head;
-            unsafe {
-                old_head = self.pd(old_idx)?;
-            }
+            let old_head = self.pd(old_idx)?;
             old_head.prev = Some(idx);
         }
         let old_root = self.root;
         self.root = Some(idx);
-        let pd;
-        unsafe {
-            pd = self.pd(idx)?;
-        }
+        let pd = self.pd(idx)?;
         pd.prev = None;
         pd.next = old_root;
         Ok(pd)
@@ -113,20 +107,30 @@ struct PdListIter {
     list: NonNull<PdList>,
 }
 
+impl PdListIter {
+    // Safety:
+    // - self.list comes from a field in ReamAlloc.
+    //   As long as ReamAlloc exists, so will the PdList.
+    fn list(&self) -> &PdList {
+        unsafe { self.list.as_ref() }
+    }
+}
+
 impl Iterator for PdListIter {
     type Item = PdRef;
     fn next(&mut self) -> Option<Self::Item> {
         // println!("PdListIter.next()");
         match self.next {
-            Some(idx) => {
-                unsafe {
-                    self.next = self.list.as_mut().pd(idx).unwrap().next;
+            Some(idx) => match self.list().pd(idx) {
+                Ok(pd) => {
+                    self.next = pd.next;
+                    Some(PdRef {
+                        idx,
+                        list: self.list,
+                    })
                 }
-                Some(PdRef {
-                    idx,
-                    list: self.list,
-                })
-            }
+                Err(_) => None,
+            },
             None => None,
         }
     }

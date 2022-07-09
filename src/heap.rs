@@ -40,7 +40,7 @@ impl Heap {
                     //   and we have checked that the offset is within the allocated space.
                     unsafe { Ok(NonNull::new_unchecked(addr.as_ptr().offset(off as isize))) }
                 }
-            },
+            }
         }
     }
     pub fn offset_from(&self, ptr: NonNull<u8>) -> Result<usize, AllocError> {
@@ -59,7 +59,7 @@ impl Heap {
                 // - We checked that diff > 0
                 // - usize::MAX > isize::MAX
                 Ok(diff as usize)
-            },
+            }
         }
     }
 }
@@ -70,8 +70,10 @@ impl Drop for Heap {
         if let Some(addr) = self.addr {
             // Safety:
             // - We only try to deallocate if the heap is allocated (self.addr.is_some())
+            // - We panic if deallocation failed, as we have no way to fail gracefully.
             unsafe {
-                self.deallocate(addr);
+                self.deallocate(addr)
+                    .expect("Deallocation failed while dropping heap");
             }
         }
     }
@@ -82,7 +84,8 @@ unsafe impl Allocator for Heap {
         if self.addr.is_some() {
             return Err(AllocError::HeapAlreadyAllocated);
         }
-        assert_eq!(self.size, 0);  // Invariant
+        assert_eq!(self.size, 0); // Invariant
+
         // Safety:
         // - We check the return value of mmap
         // - We use NonNull::new to further check the returned address.
@@ -108,7 +111,7 @@ unsafe impl Allocator for Heap {
                         self.addr = Some(addr);
                         self.size = aligned_size;
                         Ok(addr)
-                    },
+                    }
                 }
             }
         }
